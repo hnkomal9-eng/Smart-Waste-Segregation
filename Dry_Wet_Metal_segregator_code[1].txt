@@ -1,0 +1,102 @@
+#include <Stepper.h>
+#include <Servo.h>
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>
+
+#define STEPS 2048
+Stepper stepper(STEPS, 8, 10, 9, 11); // ULN2003 -> IN1=8, IN2=10, IN3=9, IN4=11
+
+Servo gateServo;
+LiquidCrystal_I2C lcd(0x27, 16, 2);
+
+#define IR_PIN 5
+#define PROXI_PIN 6
+#define RAIN_PIN A0
+#define BUZZER_PIN 12
+
+#define SERVO_OPEN 90
+#define SERVO_CLOSE 0
+#define RAIN_THRESHOLD 700
+
+void setup() {
+  Serial.begin(9600);
+  pinMode(IR_PIN, INPUT);
+  pinMode(PROXI_PIN, INPUT);
+  pinMode(BUZZER_PIN, OUTPUT);
+  pinMode(RAIN_PIN, INPUT);
+
+  gateServo.attach(7);
+  gateServo.write(SERVO_CLOSE);
+
+  stepper.setSpeed(10); // RPM
+
+  lcd.init();
+  lcd.backlight();
+  lcd.setCursor(0, 0);
+  lcd.print("Waste Sorter");
+  lcd.setCursor(0, 1);
+  lcd.print("System Ready");
+  delay(1500);
+  lcd.clear();
+}
+
+void loop() {
+  int irVal = digitalRead(IR_PIN);
+  int proxiVal = digitalRead(PROXI_PIN);
+  int rainVal = analogRead(RAIN_PIN);
+
+  Serial.print("IR: "); Serial.print(irVal);
+  Serial.print(" | PROX: "); Serial.print(proxiVal);
+  Serial.print(" | RAIN: "); Serial.println(rainVal);
+
+  // ---- DRY WASTE ----
+  if (irVal == LOW && proxiVal == LOW && rainVal > RAIN_THRESHOLD) {
+    processWaste("Dry Waste", 512);
+  }
+
+  // ---- METAL WASTE ----
+  else if (proxiVal == HIGH) {
+    processWaste("Metal Waste", 1024);
+  }
+
+  // ---- WET WASTE ----
+  else if (rainVal < RAIN_THRESHOLD) {
+    processWaste("Wet Waste", 1536);
+  }
+
+  delay(400);
+}
+
+void processWaste(const char* wasteType, int steps) {
+  lcd.clear();
+  lcd.print(wasteType);
+  Serial.println(wasteType);
+
+  // Step 1: Rotate Stepper
+  lcd.setCursor(0, 1);
+  lcd.print("Rotating Bin...");
+  stepper.step(steps);  
+  delay(500); // wait for stability
+
+  // Step 2: Open Servo
+  lcd.clear();
+  lcd.print("Dropping Waste");
+  gateServo.write(SERVO_OPEN);
+  digitalWrite(BUZZER_PIN, HIGH);
+  delay(700);
+
+  // Step 3: Close Servo
+  gateServo.write(SERVO_CLOSE);
+  digitalWrite(BUZZER_PIN, LOW);
+  delay(500);
+
+  // Step 4: Return to Home
+  lcd.clear();
+  lcd.print("Returning Home");
+  stepper.step(-steps);
+  delay(500);
+
+  lcd.clear();
+  lcd.print("Waiting...");
+  delay(1000);
+}
